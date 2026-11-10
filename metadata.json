@@ -1,0 +1,8 @@
+{
+  "name": "Remix Zero Waste Kitchen",
+  "description": "Zero-waste culinary systems, chef training, upcycled gastronomy recipes, and intuitive inventory tracking with community donation alerts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
