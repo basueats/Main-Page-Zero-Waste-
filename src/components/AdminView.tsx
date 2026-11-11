@@ -432,14 +432,19 @@ export const AdminView: React.FC<AdminViewProps> = ({
             <div className="space-y-1.5">
               <div className="inline-flex items-center space-x-1.5 px-3 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
                 <Sparkles className="w-3 h-3 text-emerald-400" />
-                <span>BACKEND 3-DAY TRIAL TESTING SUITE</span>
+                <span>BACKEND UNRESTRICTED MULTI-LOGIN TESTING SUITE</span>
               </div>
               <h2 className="text-xl sm:text-2xl font-black font-heading tracking-tight text-white">
                 Workstation Testing & Access Simulator
               </h2>
               <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-                As requested, this developer testing suite is kept exclusively inside the backend admin portal. You can reset device holds, activate a fresh 3-day trial session, or simulate the 72-hour trial expiry lock.
+                On the live website, visitors are strictly restricted to <strong>one-time trial login per MAC address</strong>. Here in the backend admin portal, you can test and log in as many times as you want without restriction.
               </p>
+              <div className="flex items-center space-x-3 text-[11px] font-mono text-emerald-300 pt-1">
+                <span>Current Workstation MAC: <strong className="text-white">{deviceHoldService.getDeviceInfo().macHash}</strong></span>
+                <span>•</span>
+                <span>IP: <strong className="text-white">{deviceHoldService.getDeviceInfo().ipAddress}</strong></span>
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -451,6 +456,20 @@ export const AdminView: React.FC<AdminViewProps> = ({
               >
                 <Sparkles className="w-4 h-4" />
                 <span>Test 3-Day Trial (Open Home)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  deviceHoldService.resetDeviceHold();
+                  loadData();
+                  showActionNotice('Reset Workstation MAC & IP holds! You can log in and test again freely.');
+                }}
+                className="px-4 py-3 rounded-xl font-bold text-xs uppercase tracking-wider bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 flex items-center space-x-2 transition-all cursor-pointer"
+                title="Clear all device and MAC holds for testing"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>Reset MAC & Device Holds (Dev)</span>
               </button>
 
               <button
@@ -788,9 +807,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
                               </span>
                             </td>
 
-                            {/* IP & Device ID */}
+                            {/* IP, MAC & Device ID */}
                             <td className="py-3.5 px-4 font-mono text-[11px]">
-                              <div className="text-slate-800">{u.ipAddress}</div>
+                              <div className="text-slate-800 font-semibold">{u.ipAddress}</div>
+                              <div className="text-[10px] text-emerald-700 font-bold">MAC: {u.macAddress || 'B8:27:EB:4A:2F:90'}</div>
                               <div className="text-[10px] text-slate-400">{u.deviceId}</div>
                             </td>
 
@@ -904,8 +924,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           <span className="font-bold text-slate-900">{u.daysRunning} days</span>
                         </div>
                         <div>
-                          <span className="text-[10px] text-slate-400 block font-sans">Client IP</span>
-                          <span className="text-[11px]">{u.ipAddress}</span>
+                          <span className="text-[10px] text-slate-400 block font-sans">Network & MAC</span>
+                          <span className="text-[11px] block">{u.ipAddress}</span>
+                          <span className="text-[10px] text-emerald-700 font-bold block">MAC: {u.macAddress || 'B8:27:EB:4A:2F:90'}</span>
                         </div>
                         <div>
                           <span className="text-[10px] text-slate-400 block font-sans">Status</span>

@@ -377,6 +377,7 @@ export default function App() {
         onLoginSuccess={handleLoginSuccess}
         onOpenDashboard={() => setCurrentPage('dashboard')}
         onRedirectHome={() => setCurrentPage('home')}
+        onOpenAdminPortal={() => setCurrentPage('admin')}
       />
 
       <TrialExpiredHoldModal

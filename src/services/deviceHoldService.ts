@@ -21,6 +21,8 @@ export interface DeviceHoldRecord {
   memberName?: string;
   chefName?: string;
   paidTransactionId?: string;
+  trialLoginCount?: number;
+  macRestricted?: boolean;
   lastAccessAt: number;
 }
 
@@ -28,6 +30,7 @@ const STORAGE_KEY = 'zw_device_network_hold_v1';
 const USERS_STORAGE_KEY = 'zw_admin_enrolled_users_v1';
 const NOTIFICATIONS_STORAGE_KEY = 'zw_admin_payment_notifications_v1';
 const CUSTOMER_NOTICES_KEY = 'zw_customer_approval_notices_v1';
+const RESTRICTED_MAC_KEY = 'zw_restricted_mac_registry_v1';
 const TRIAL_DURATION_MS = 3 * 24 * 60 * 60 * 1000; // 72 hours (3 days)
 const ANNUAL_DURATION_MS = 365 * 24 * 60 * 60 * 1000; // 365 days (1 year)
 
@@ -96,6 +99,7 @@ const INITIAL_ENROLLED_USERS: EnrolledUserRecord[] = [
     ziinaTransactionId: 'ZN-PAY-9812401',
     ipAddress: '194.71.142.68',
     deviceId: 'DEV-4E8A-2911',
+    macAddress: 'B8:27:EB:4E:8A:29',
     enrolledAt: 'Oct 14, 2026',
     enrolledTimestamp: Date.now() - (28 * 24 * 3600 * 1000),
     lastLoginAt: '2 hours ago',
@@ -118,6 +122,7 @@ const INITIAL_ENROLLED_USERS: EnrolledUserRecord[] = [
     ziinaTransactionId: 'ZN-PAY-4491022',
     ipAddress: '185.192.68.104',
     deviceId: 'DEV-9B21-8842',
+    macAddress: 'B8:27:EB:9B:21:88',
     enrolledAt: 'Nov 02, 2026',
     enrolledTimestamp: Date.now() - (9 * 24 * 3600 * 1000),
     lastLoginAt: 'Yesterday at 04:15 PM',
@@ -140,6 +145,7 @@ const INITIAL_ENROLLED_USERS: EnrolledUserRecord[] = [
     ziinaTransactionId: 'ZN-PAY-7719203',
     ipAddress: '213.180.204.11',
     deviceId: 'DEV-1A3C-6509',
+    macAddress: 'B8:27:EB:1A:3C:65',
     enrolledAt: 'Nov 06, 2026',
     enrolledTimestamp: Date.now() - (5 * 24 * 3600 * 1000),
     lastLoginAt: 'Today at 08:30 AM',
@@ -161,6 +167,7 @@ const INITIAL_ENROLLED_USERS: EnrolledUserRecord[] = [
     status: 'trial_active',
     ipAddress: '194.71.189.15',
     deviceId: 'DEV-F089-1123',
+    macAddress: 'B8:27:EB:F0:89:11',
     enrolledAt: 'Nov 09, 2026',
     enrolledTimestamp: Date.now() - (1 * 24 * 3600 * 1000),
     lastLoginAt: '45 mins ago',
@@ -182,6 +189,7 @@ const INITIAL_ENROLLED_USERS: EnrolledUserRecord[] = [
     status: 'trial_expired',
     ipAddress: '195.154.122.90',
     deviceId: 'DEV-D442-9901',
+    macAddress: 'B8:27:EB:D4:42:99',
     enrolledAt: 'Nov 04, 2026',
     enrolledTimestamp: Date.now() - (7 * 24 * 3600 * 1000),
     lastLoginAt: '3 days ago',
@@ -271,10 +279,78 @@ class DeviceHoldService {
     return false;
   }
 
+  public getRestrictedMacRegistry(): string[] {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(RESTRICTED_MAC_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /**
+   * On live website, each device/MAC is strictly restricted to ONE-TIME 3-day trial login.
+   * In backend admin mode, testing is unlimited.
+   */
+  public isMacRestrictedFromTrial(macHash?: string): { 
+    isRestricted: boolean; 
+    macAddress: string; 
+    ipAddress: string; 
+    deviceId: string;
+    loginCount: number; 
+    message?: string;
+    canResumeExistingTrial: boolean;
+  } {
+    const record = this.getRecord();
+    const targetMac = macHash || record.macHash;
+    const isPaid = this.hasActivePaidMembership();
+
+    if (isPaid) {
+      return {
+        isRestricted: false,
+        macAddress: targetMac,
+        ipAddress: record.ipAddress,
+        deviceId: record.deviceId,
+        loginCount: record.trialLoginCount || 1,
+        canResumeExistingTrial: false
+      };
+    }
+
+    const registry = this.getRestrictedMacRegistry();
+    const hasBeenRegistered = registry.includes(targetMac);
+    const count = record.trialLoginCount || (record.trialClaimed ? 1 : 0);
+    const trialActive = this.isTrialActive();
+
+    // If device has claimed trial once on this MAC / IP:
+    // It is strictly restricted to ONE trial login
+    if (hasBeenRegistered || record.trialClaimed || count >= 1) {
+      return {
+        isRestricted: !trialActive, // If trial expired or trying to register again -> strictly restricted
+        macAddress: targetMac,
+        ipAddress: record.ipAddress,
+        deviceId: record.deviceId,
+        loginCount: count,
+        canResumeExistingTrial: trialActive,
+        message: `Workstation Access Restricted: MAC ${targetMac} has already utilized its 1-time free trial on the live website. Free trials are strictly limited to one time per physical workstation.`
+      };
+    }
+
+    return {
+      isRestricted: false,
+      macAddress: targetMac,
+      ipAddress: record.ipAddress,
+      deviceId: record.deviceId,
+      loginCount: 0,
+      canResumeExistingTrial: false
+    };
+  }
+
   public canClaimTrial(): boolean {
     if (this.hasActivePaidMembership()) return false;
     const record = this.getRecord();
-    return !record.trialClaimed;
+    const check = this.isMacRestrictedFromTrial();
+    return !record.trialClaimed && !check.isRestricted;
   }
 
   public getTrialTimeRemaining(): { days: number; hours: number; minutes: number; isExpired: boolean } {
@@ -296,7 +372,7 @@ class DeviceHoldService {
   }
 
   /**
-   * Activate 0 USD 3-Day Free Trial
+   * Activate 0 USD 3-Day Free Trial (1-time only per MAC on live website)
    */
   public activateTrial(
     email: string, 
@@ -305,18 +381,33 @@ class DeviceHoldService {
   ): DeviceHoldRecord {
     const record = this.getRecord();
     const now = Date.now();
+    const newCount = (record.trialLoginCount || 0) + 1;
+
+    // Register MAC in the persistent restriction registry
+    if (typeof window !== 'undefined') {
+      try {
+        const registry = this.getRestrictedMacRegistry();
+        if (!registry.includes(record.macHash)) {
+          registry.push(record.macHash);
+          localStorage.setItem(RESTRICTED_MAC_KEY, JSON.stringify(registry));
+        }
+      } catch (e) {}
+    }
+
     const updated: DeviceHoldRecord = {
       ...record,
       trialClaimed: true,
       trialStartedAt: now,
       trialExpiresAt: now + TRIAL_DURATION_MS,
+      trialLoginCount: newCount,
+      macRestricted: true,
       userEmail: email,
       memberName: memberName || record.memberName,
       lastAccessAt: now
     };
     this.saveRecord(updated);
 
-    // Record in admin users database
+    // Record in admin users database with MAC address
     this.recordUserEnrollment({
       id: `USR-${Math.floor(1000 + Math.random() * 9000)}`,
       name: memberName || 'Kitchen Professional',
@@ -331,6 +422,7 @@ class DeviceHoldService {
       status: 'trial_active',
       ipAddress: record.ipAddress,
       deviceId: record.deviceId,
+      macAddress: record.macHash,
       enrolledAt: new Date(now).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
       enrolledTimestamp: now,
       lastLoginAt: 'Just now',
@@ -428,6 +520,7 @@ class DeviceHoldService {
     try {
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem('zw_simulated_client_ip');
+      localStorage.removeItem(RESTRICTED_MAC_KEY);
     } catch (e) {
       // Ignore
     }

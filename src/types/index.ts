@@ -27,6 +27,7 @@ export interface EnrolledUserRecord {
   ziinaTransactionId?: string;
   ipAddress: string;
   deviceId: string;
+  macAddress?: string;
   enrolledAt: string;
   enrolledTimestamp: number;
   lastLoginAt: string;
@@ -103,6 +104,8 @@ export interface ChefUserProfile {
   isIpHeld?: boolean;
   clientIp?: string;
   deviceId?: string;
+  macAddress?: string;
+  macRestricted?: boolean;
   planStatus?: 'trial_active' | 'trial_expired' | 'pro_active' | 'team_active' | 'training_active' | 'pending_approval' | 'none';
 }
 

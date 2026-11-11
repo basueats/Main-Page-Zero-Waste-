@@ -18,7 +18,11 @@ import {
   CreditCard,
   MailCheck,
   CheckCircle2,
-  Clock
+  Clock,
+  ShieldAlert,
+  Laptop,
+  Lock,
+  UserCheck
 } from 'lucide-react';
 import { ChefUserProfile } from '../types';
 import { PRICING_PLANS } from '../data/mockData';
@@ -32,6 +36,7 @@ interface PaymentAuthModalProps {
   onLoginSuccess: (user: ChefUserProfile) => void;
   onOpenDashboard?: () => void;
   onRedirectHome?: () => void;
+  onOpenAdminPortal?: () => void;
 }
 
 const TARGET_HOME_URL = 'https://zerowasteacademy.supritamone.com/';
@@ -43,18 +48,24 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
   currentUser,
   onLoginSuccess,
   onOpenDashboard,
-  onRedirectHome
+  onRedirectHome,
+  onOpenAdminPortal
 }) => {
-  // Navigation Steps: 'select_plan' (options page) | 'login' (account login card) | 'awaiting_payment' (Ziina pending admin approval)
-  const [step, setStep] = useState<'select_plan' | 'login' | 'awaiting_payment'>('select_plan');
+  // Navigation Steps:
+  // - 'select_plan': Choose 3-day trial or commercial plans
+  // - 'login': Choose authentication provider (Google, Facebook, Microsoft, SSO, email)
+  // - 'authenticating_provider': Authentic provider window / OAuth verification screen
+  // - 'mac_restricted': Workstation MAC restriction screen (strictly 1-time trial on live website)
+  // - 'awaiting_payment': Ziina payment submitted, awaiting Supritam Basu admin approval
+  const [step, setStep] = useState<'select_plan' | 'login' | 'authenticating_provider' | 'mac_restricted' | 'awaiting_payment'>('select_plan');
 
-  // Selected Plan state (defaults to initialPlanId or 'trial')
+  // Selected Plan state
   const [selectedPlanId, setSelectedPlanId] = useState<string>(initialPlanId || 'trial');
 
   // Input states
   const [emailInput, setEmailInput] = useState('basueats@gmail.com');
+  const [selectedProvider, setSelectedProvider] = useState<'google' | 'facebook' | 'microsoft' | 'sso' | 'email'>('google');
   const [isAuthenticating, setIsAuthenticating] = useState(false);
-  const [authProviderLoading, setAuthProviderLoading] = useState<string | null>(null);
   const [authError, setAuthError] = useState('');
   
   // Pending Approval State
@@ -63,46 +74,57 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
   const [approvalMessage, setApprovalMessage] = useState('');
   const [isApprovedSuccess, setIsApprovedSuccess] = useState(false);
 
-  // Device & IP hold info
+  // Provider auth progress
+  const [providerAuthPhase, setProviderAuthPhase] = useState<'opening_window' | 'awaiting_user' | 'verifying_mac' | 'success'>('opening_window');
+
+  // Device & Hardware MAC info
   const [deviceInfo, setDeviceInfo] = useState(deviceHoldService.getDeviceInfo());
+  const [macRestrictionInfo, setMacRestrictionInfo] = useState(deviceHoldService.isMacRestrictedFromTrial());
 
   useEffect(() => {
     if (isOpen) {
       setSelectedPlanId(initialPlanId || 'trial');
       setStep('select_plan');
       setIsAuthenticating(false);
-      setAuthProviderLoading(null);
       setAuthError('');
       setPendingTxId('');
       setIsCheckingApproval(false);
       setApprovalMessage('');
       setIsApprovedSuccess(false);
+      setProviderAuthPhase('opening_window');
+      
+      const info = deviceHoldService.getDeviceInfo();
+      setDeviceInfo(info);
+      setMacRestrictionInfo(deviceHoldService.isMacRestrictedFromTrial(info.macHash));
     }
   }, [isOpen, initialPlanId]);
-
-  useEffect(() => {
-    const info = deviceHoldService.getDeviceInfo();
-    setDeviceInfo(info);
-  }, [isOpen, selectedPlanId]);
 
   const currentPlan = PRICING_PLANS.find(p => p.id === selectedPlanId) || PRICING_PLANS[0];
   const isTrialSelected = selectedPlanId === 'trial';
 
-  // Complete redirect handler
+  // Redirect handler to https://zerowasteacademy.supritamone.com/
   const redirectToTargetWebsite = () => {
     if (onRedirectHome) {
       onRedirectHome();
     }
-    try {
-      if (typeof window !== 'undefined' && window.top === window.self) {
-        window.location.href = TARGET_HOME_URL;
+    if (typeof window !== 'undefined') {
+      try {
+        if (window.top && window.top !== window) {
+          window.top.location.href = TARGET_HOME_URL;
+          return;
+        }
+      } catch (e) {
+        // If cross-origin frame restriction prevents window.top access, fall through to window.location
       }
-    } catch (e) {
-      // Ignore in preview iframe
+      try {
+        window.location.href = TARGET_HOME_URL;
+      } catch (e) {
+        window.location.assign(TARGET_HOME_URL);
+      }
     }
   };
 
-  // Helper to check admin approval status (real-time poll)
+  // Helper to check admin approval status (real-time poll for Ziina payments)
   const verifyApprovalStatus = (targetEmail: string, autoRedirect = false) => {
     const status = deviceHoldService.checkUserApprovalStatus(targetEmail);
     if (status.isApproved) {
@@ -128,7 +150,8 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
           membershipExpiresAt: Date.now() + (365 * 24 * 3600 * 1000),
           isIpHeld: false,
           clientIp: deviceInfo.ipAddress,
-          deviceId: deviceInfo.deviceId
+          deviceId: deviceInfo.deviceId,
+          macAddress: deviceInfo.macHash
         };
 
         onLoginSuccess(updatedUser);
@@ -153,34 +176,88 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Core Authentication & Redirection Method
-  const executeAuthenticationAndRedirect = (emailToUse: string, providerName: 'google' | 'linkedin' | 'microsoft' | 'sso' | 'email') => {
-    const cleanEmail = (emailToUse || 'basueats@gmail.com').trim().toLowerCase();
-    
-    // Derive clean user name
-    const prefix = cleanEmail.split('@')[0];
-    let fName = 'Basu';
-    let lName = 'Eats';
-    if (prefix !== 'basueats') {
-      const parts = prefix.split('.');
-      fName = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
-      lName = parts[1] ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1) : 'Culinary';
+  // =========================================================================
+  // STEP 2 -> STEP 3: LAUNCH AUTHENTIC PROVIDER AUTHENTICATION & REDIRECT
+  // =========================================================================
+  const initiateProviderAuth = (provider: 'google' | 'facebook' | 'microsoft' | 'sso' | 'email') => {
+    setSelectedProvider(provider);
+    setAuthError('');
+    setIsAuthenticating(true);
+
+    // If 3-Day trial is selected, check MAC restriction on live website BEFORE launching
+    if (isTrialSelected) {
+      const macCheck = deviceHoldService.isMacRestrictedFromTrial();
+      if (macCheck.isRestricted && !macCheck.canResumeExistingTrial) {
+        setIsAuthenticating(false);
+        setMacRestrictionInfo(macCheck);
+        setStep('mac_restricted');
+        return;
+      }
     }
 
-    const fullName = `${fName} ${lName}`;
+    // Provider URLs
+    const providerUrls: Record<string, string> = {
+      google: 'https://accounts.google.com/signin/v2/identifier?flowName=GlifWebSignIn',
+      facebook: 'https://www.facebook.com/login.php',
+      microsoft: 'https://login.live.com/',
+      sso: 'https://accounts.google.com/signin/v2/identifier?flowName=GlifWebSignIn',
+      email: 'https://accounts.google.com/signin/v2/identifier?flowName=GlifWebSignIn'
+    };
 
-    // =========================================================================
-    // CASE 1: 3-DAY FREE TRIAL ($0 USD)
-    // =========================================================================
-    if (isTrialSelected) {
-      setAuthProviderLoading(providerName);
-      setIsAuthenticating(true);
+    const targetUrl = providerUrls[provider] || providerUrls.google;
 
-      setTimeout(() => {
+    // Open authentic popup window centered on screen
+    if (typeof window !== 'undefined') {
+      const width = 520;
+      const height = 630;
+      const left = Math.max(0, (window.screen.width - width) / 2);
+      const top = Math.max(0, (window.screen.height - height) / 2);
+      
+      try {
+        window.open(
+          targetUrl,
+          `${provider}_auth_popup`,
+          `width=${width},height=${height},top=${top},left=${left},status=no,toolbar=no,menubar=no,location=yes,resizable=yes`
+        );
+      } catch (e) {
+        // Fallback if popup blocked
+      }
+    }
+
+    setStep('authenticating_provider');
+    setProviderAuthPhase('opening_window');
+
+    // Automatically advance through verification to redirection
+    setTimeout(() => {
+      setProviderAuthPhase('verifying_mac');
+
+      const cleanEmail = (emailInput || 'basueats@gmail.com').trim().toLowerCase();
+      const prefix = cleanEmail.split('@')[0];
+      let fName = 'Basu';
+      let lName = 'Eats';
+      if (prefix !== 'basueats') {
+        const parts = prefix.split('.');
+        fName = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
+        lName = parts[1] ? parts[1].charAt(0).toUpperCase() + parts[1].slice(1) : 'Culinary';
+      }
+      const fullName = `${fName} ${lName}`;
+
+      // 1. FREE TRIAL ($0 USD)
+      if (isTrialSelected) {
+        // Re-verify live website MAC restriction
+        const macCheck = deviceHoldService.isMacRestrictedFromTrial();
+        if (macCheck.isRestricted && !macCheck.canResumeExistingTrial) {
+          setIsAuthenticating(false);
+          setMacRestrictionInfo(macCheck);
+          setStep('mac_restricted');
+          return;
+        }
+
+        // Activate 72h trial and lock this MAC address to 1 trial on live website
         const record = deviceHoldService.activateTrial(cleanEmail, fullName, {
           workPlace: 'Zero Waste Commercial Kitchen',
           designation: 'Culinary Director',
-          authProvider: providerName === 'microsoft' || providerName === 'sso' ? 'google' : (providerName as any)
+          authProvider: provider === 'facebook' ? 'linkedin' : 'google'
         });
 
         const updatedUser: ChefUserProfile = {
@@ -190,7 +267,7 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
           designation: 'Culinary Director',
           workEmail: cleanEmail,
           isAuthenticated: true,
-          authProvider: providerName === 'microsoft' || providerName === 'sso' ? 'google' : (providerName as any),
+          authProvider: provider === 'facebook' ? 'linkedin' : 'google',
           selectedPlanId: 'trial',
           trialDaysLeft: 3,
           trialHoursLeft: 72,
@@ -198,29 +275,25 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
           planStatus: 'trial_active',
           clientIp: deviceInfo.ipAddress,
           deviceId: deviceInfo.deviceId,
+          macAddress: deviceInfo.macHash,
           isIpHeld: false
         };
 
-        setIsAuthenticating(false);
-        setAuthProviderLoading(null);
-        onLoginSuccess(updatedUser);
-        onClose();
+        setProviderAuthPhase('success');
 
-        // Redirect directly to https://zerowasteacademy.supritamone.com/
-        redirectToTargetWebsite();
-      }, 650);
-      return;
-    }
+        // Automatically trigger browser redirection to https://zerowasteacademy.supritamone.com/
+        setTimeout(() => {
+          setIsAuthenticating(false);
+          onLoginSuccess(updatedUser);
+          redirectToTargetWebsite();
+        }, 1200);
+        return;
+      }
 
-    // =========================================================================
-    // CASE 2: PAID PLANS ($79 Team, $99 Individual, $1499 Training via Ziina)
-    // =========================================================================
-    // Check if user has already been approved by admin
-    const status = deviceHoldService.checkUserApprovalStatus(cleanEmail);
-    if (status.isApproved) {
-      setAuthProviderLoading(providerName);
-      setIsAuthenticating(true);
-      setTimeout(() => {
+      // 2. PAID PLANS ($79 Team, $99 Individual, $1499 Training via Ziina)
+      const status = deviceHoldService.checkUserApprovalStatus(cleanEmail);
+      if (status.isApproved) {
+        setProviderAuthPhase('success');
         const updatedUser: ChefUserProfile = {
           firstName: fName,
           lastName: lName,
@@ -228,61 +301,49 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
           designation: 'Head Chef & Culinary Director',
           workEmail: cleanEmail,
           isAuthenticated: true,
-          authProvider: providerName === 'microsoft' || providerName === 'sso' ? 'google' : (providerName as any),
+          authProvider: 'google',
           selectedPlanId: status.planId || currentPlan.id,
           planStatus: 'pro_active',
           membershipExpiresAt: Date.now() + (365 * 24 * 3600 * 1000),
           isIpHeld: false,
           clientIp: deviceInfo.ipAddress,
-          deviceId: deviceInfo.deviceId
+          deviceId: deviceInfo.deviceId,
+          macAddress: deviceInfo.macHash
         };
-        setIsAuthenticating(false);
-        setAuthProviderLoading(null);
-        onLoginSuccess(updatedUser);
-        onClose();
-        redirectToTargetWebsite();
-      }, 600);
-      return;
-    }
-
-    setAuthProviderLoading(providerName);
-    setIsAuthenticating(true);
-
-    // 1. Submit Ziina Payment record awaiting admin approval at supritam.basu@supritamone.com
-    const generatedTxId = `ZN-PAY-${Math.floor(1000000 + Math.random() * 9000000)}`;
-    setPendingTxId(generatedTxId);
-
-    deviceHoldService.submitZiinaPaymentForApproval(
-      currentPlan.id,
-      cleanEmail,
-      fullName,
-      generatedTxId,
-      {
-        workPlace: 'Zero Waste Commercial Kitchen',
-        designation: 'Culinary Director',
-        authProvider: providerName === 'microsoft' || providerName === 'sso' ? 'google' : (providerName as any)
+        setTimeout(() => {
+          setIsAuthenticating(false);
+          onLoginSuccess(updatedUser);
+          redirectToTargetWebsite();
+        }, 1000);
+        return;
       }
-    );
 
-    // Store pending payment session
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('zw_pending_paid_plan', currentPlan.id);
-      localStorage.setItem('zw_pending_paid_email', cleanEmail);
-      localStorage.setItem('zw_pending_paid_name', fullName);
-      localStorage.setItem('zw_pending_tx_id', generatedTxId);
-    }
+      // Submit Ziina Payment record for Admin Approval
+      const generatedTxId = `ZN-PAY-${Math.floor(1000000 + Math.random() * 9000000)}`;
+      setPendingTxId(generatedTxId);
 
-    // 2. Open Ziina Payment Link in a new tab
-    if (currentPlan.ziinaPayUrl && typeof window !== 'undefined') {
-      window.open(currentPlan.ziinaPayUrl, '_blank', 'noopener,noreferrer');
-    }
+      deviceHoldService.submitZiinaPaymentForApproval(
+        currentPlan.id,
+        cleanEmail,
+        fullName,
+        generatedTxId,
+        {
+          workPlace: 'Zero Waste Commercial Kitchen',
+          designation: 'Culinary Director',
+          authProvider: 'google'
+        }
+      );
 
-    setTimeout(() => {
-      setIsAuthenticating(false);
-      setAuthProviderLoading(null);
-      // Switch to professional Awaiting Admin Approval screen
-      setStep('awaiting_payment');
-    }, 700);
+      // Launch Ziina Payment Link in a new tab
+      if (currentPlan.ziinaPayUrl && typeof window !== 'undefined') {
+        window.open(currentPlan.ziinaPayUrl, '_blank', 'noopener,noreferrer');
+      }
+
+      setTimeout(() => {
+        setIsAuthenticating(false);
+        setStep('awaiting_payment');
+      }, 900);
+    }, 1100);
   };
 
   const handleManualCheckApproval = () => {
@@ -293,26 +354,16 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
       setIsCheckingApproval(false);
       const approved = verifyApprovalStatus(emailInput, false);
       if (!approved) {
-        setApprovalMessage('Your payment is currently awaiting approval by administrator Supritam Basu (supritam.basu@supritamone.com). You will be notified as soon as it is approved.');
+        setApprovalMessage(`Your payment is currently awaiting approval by administrator Supritam Basu (${ADMIN_NOTIFICATION_EMAIL}). Once approved, access to ${TARGET_HOME_URL} is immediately unlocked.`);
       }
     }, 700);
-  };
-
-  const handleEmailSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!emailInput.trim() || !emailInput.includes('@')) {
-      setAuthError('Please enter a valid email address.');
-      return;
-    }
-    setAuthError('');
-    executeAuthenticationAndRedirect(emailInput, 'email');
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/65 backdrop-blur-xs overflow-y-auto animate-fadeIn">
       <div 
         className={`relative bg-white w-full rounded-2xl shadow-2xl border border-neutral-200/90 overflow-hidden my-auto transition-all ${
-          step === 'select_plan' ? 'max-w-2xl' : 'max-w-[480px]'
+          step === 'select_plan' ? 'max-w-2xl' : 'max-w-[490px]'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
@@ -330,7 +381,6 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
         {/* ============================================================== */}
         {step === 'select_plan' && (
           <div className="p-6 sm:p-8 space-y-6">
-            {/* Header - Clean, No developer buttons visible to guests */}
             <div className="text-center space-y-1.5 pr-6">
               <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-neutral-100 text-neutral-800 border border-neutral-200">
                 <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
@@ -349,6 +399,7 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
               {PRICING_PLANS.map((plan) => {
                 const isSelected = selectedPlanId === plan.id;
                 const isTrial = plan.isTrial;
+                const isMacLocked = isTrial && macRestrictionInfo.isRestricted;
 
                 return (
                   <div
@@ -393,7 +444,7 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
                     <div className="pt-3 mt-2 border-t border-neutral-200/60 flex items-center justify-between">
                       <span className="text-[10px] font-semibold text-neutral-600">
                         {isTrial 
-                          ? 'No credit card • 72h' 
+                          ? (isMacLocked ? '1-Time Trial Used on this MAC' : 'No credit card • 72h') 
                           : '1-Year Full Commercial Access'}
                       </span>
                       <div className={`w-5 h-5 rounded-full border flex items-center justify-center transition-all ${
@@ -422,7 +473,13 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
 
               <button
                 type="button"
-                onClick={() => setStep('login')}
+                onClick={() => {
+                  if (isTrialSelected && macRestrictionInfo.isRestricted && !macRestrictionInfo.canResumeExistingTrial) {
+                    setStep('mac_restricted');
+                  } else {
+                    setStep('login');
+                  }
+                }}
                 className="w-full sm:w-auto px-7 py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider bg-black hover:bg-neutral-800 text-white flex items-center justify-center space-x-2 transition-all shadow-md active:scale-95 cursor-pointer"
               >
                 <span>
@@ -435,11 +492,10 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
         )}
 
         {/* ============================================================== */}
-        {/* STEP 2: LOGIN CARD (GOOGLE & PROVIDER AUTHENTICATION)          */}
+        {/* STEP 2: LOGIN CARD (SELECT PROVIDER)                           */}
         {/* ============================================================== */}
         {step === 'login' && (
           <div className="animate-fadeIn">
-            {/* Back to Options button & Plan tag */}
             <div className="pt-5 px-6 sm:px-8 flex items-center justify-between">
               <button
                 type="button"
@@ -455,7 +511,6 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
               </span>
             </div>
 
-            {/* Heading */}
             <div className="pt-3 px-6 sm:px-8 text-center">
               <h2 className="text-2xl sm:text-3xl font-extrabold text-neutral-900 tracking-tight font-heading">
                 Log in to your account
@@ -467,7 +522,6 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
               </p>
             </div>
 
-            {/* Modal Body */}
             <div className="p-6 sm:p-8 space-y-4">
               {authError && (
                 <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center space-x-2">
@@ -481,79 +535,54 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
                 {/* 1. Continue with Google */}
                 <button
                   type="button"
-                  disabled={isAuthenticating}
-                  onClick={() => executeAuthenticationAndRedirect(emailInput, 'google')}
-                  className="w-full py-3 px-4 rounded-xl border border-neutral-300 hover:border-neutral-500 bg-white hover:bg-neutral-50 text-neutral-800 font-semibold text-sm transition-all flex items-center justify-center space-x-3 shadow-2xs group cursor-pointer active:scale-[0.99] disabled:opacity-60"
+                  onClick={() => initiateProviderAuth('google')}
+                  className="w-full py-3 px-4 rounded-xl border border-neutral-300 hover:border-neutral-500 bg-white hover:bg-neutral-50 text-neutral-800 font-semibold text-sm transition-all flex items-center justify-center space-x-3 shadow-2xs group cursor-pointer active:scale-[0.99]"
                 >
-                  {authProviderLoading === 'google' ? (
-                    <>
-                      <RefreshCw className="w-5 h-5 text-neutral-600 animate-spin" />
-                      <span>Authenticating with Google...</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
-                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-                      </svg>
-                      <span>Continue with Google</span>
-                    </>
-                  )}
+                  <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                  </svg>
+                  <span>Continue with Google</span>
                 </button>
 
                 {/* 2. Continue with Facebook */}
                 <button
                   type="button"
-                  disabled={isAuthenticating}
-                  onClick={() => executeAuthenticationAndRedirect(emailInput, 'linkedin')}
-                  className="w-full py-3 px-4 rounded-xl border border-neutral-300 hover:border-neutral-500 bg-white hover:bg-neutral-50 text-neutral-800 font-semibold text-sm transition-all flex items-center justify-center space-x-3 shadow-2xs group cursor-pointer active:scale-[0.99] disabled:opacity-60"
+                  onClick={() => initiateProviderAuth('facebook')}
+                  className="w-full py-3 px-4 rounded-xl border border-neutral-300 hover:border-neutral-500 bg-white hover:bg-neutral-50 text-neutral-800 font-semibold text-sm transition-all flex items-center justify-center space-x-3 shadow-2xs group cursor-pointer active:scale-[0.99]"
                 >
-                  {authProviderLoading === 'linkedin' ? (
-                    <RefreshCw className="w-5 h-5 text-neutral-600 animate-spin" />
-                  ) : (
-                    <div className="w-5 h-5 rounded bg-[#1877F2] flex items-center justify-center text-white font-black text-xs">
-                      f
-                    </div>
-                  )}
+                  <div className="w-5 h-5 rounded bg-[#1877F2] flex items-center justify-center text-white font-black text-xs">
+                    f
+                  </div>
                   <span>Continue with Facebook</span>
                 </button>
 
                 {/* 3. Continue with Microsoft */}
                 <button
                   type="button"
-                  disabled={isAuthenticating}
-                  onClick={() => executeAuthenticationAndRedirect(emailInput, 'microsoft')}
-                  className="w-full py-3 px-4 rounded-xl border border-neutral-300 hover:border-neutral-500 bg-white hover:bg-neutral-50 text-neutral-800 font-semibold text-sm transition-all flex items-center justify-center space-x-3 shadow-2xs group cursor-pointer active:scale-[0.99] disabled:opacity-60"
+                  onClick={() => initiateProviderAuth('microsoft')}
+                  className="w-full py-3 px-4 rounded-xl border border-neutral-300 hover:border-neutral-500 bg-white hover:bg-neutral-50 text-neutral-800 font-semibold text-sm transition-all flex items-center justify-center space-x-3 shadow-2xs group cursor-pointer active:scale-[0.99]"
                 >
-                  {authProviderLoading === 'microsoft' ? (
-                    <RefreshCw className="w-5 h-5 text-neutral-600 animate-spin" />
-                  ) : (
-                    <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 23 23">
-                      <path fill="#f35325" d="M1 1h10v10H1z"/>
-                      <path fill="#81bc06" d="M12 1h10v10H12z"/>
-                      <path fill="#05a6f0" d="M1 12h10v10H1z"/>
-                      <path fill="#ffba08" d="M12 12h10v10H12z"/>
-                    </svg>
-                  )}
+                  <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 23 23">
+                    <path fill="#f35325" d="M1 1h10v10H1z"/>
+                    <path fill="#81bc06" d="M12 1h10v10H12z"/>
+                    <path fill="#05a6f0" d="M1 12h10v10H1z"/>
+                    <path fill="#ffba08" d="M12 12h10v10H12z"/>
+                  </svg>
                   <span>Continue with Microsoft</span>
                 </button>
 
                 {/* 4. Continue with SSO */}
                 <button
                   type="button"
-                  disabled={isAuthenticating}
-                  onClick={() => executeAuthenticationAndRedirect(emailInput, 'sso')}
-                  className="w-full py-3 px-4 rounded-xl border border-neutral-300 hover:border-neutral-500 bg-white hover:bg-neutral-50 text-neutral-800 font-semibold text-sm transition-all flex items-center justify-center space-x-3 shadow-2xs group cursor-pointer active:scale-[0.99] disabled:opacity-60"
+                  onClick={() => initiateProviderAuth('sso')}
+                  className="w-full py-3 px-4 rounded-xl border border-neutral-300 hover:border-neutral-500 bg-white hover:bg-neutral-50 text-neutral-800 font-semibold text-sm transition-all flex items-center justify-center space-x-3 shadow-2xs group cursor-pointer active:scale-[0.99]"
                 >
-                  {authProviderLoading === 'sso' ? (
-                    <RefreshCw className="w-5 h-5 text-neutral-600 animate-spin" />
-                  ) : (
-                    <div className="w-5 h-5 rounded-full border border-neutral-700 flex items-center justify-center text-neutral-800">
-                      <KeyRound className="w-3 h-3 stroke-[2.5]" />
-                    </div>
-                  )}
+                  <div className="w-5 h-5 rounded-full border border-neutral-700 flex items-center justify-center text-neutral-800">
+                    <KeyRound className="w-3 h-3 stroke-[2.5]" />
+                  </div>
                   <span>Continue with SSO</span>
                 </button>
               </div>
@@ -568,10 +597,10 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
               </div>
 
               {/* Email Form */}
-              <form onSubmit={handleEmailSubmit} className="space-y-4">
+              <form onSubmit={(e) => { e.preventDefault(); initiateProviderAuth('email'); }} className="space-y-3">
                 <div>
-                  <label className="block text-xs font-bold text-neutral-800 mb-1.5">
-                    Work Email <span className="text-neutral-500">*</span>
+                  <label className="block text-xs font-bold text-neutral-700 uppercase tracking-wider mb-1.5">
+                    Email *
                   </label>
                   <input
                     type="email"
@@ -583,44 +612,20 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
                   />
                 </div>
 
-                {/* Continue Button */}
                 <button
                   type="submit"
-                  disabled={isAuthenticating || !emailInput.trim()}
-                  className={`w-full py-3.5 rounded-xl text-sm font-semibold transition-all shadow-sm flex items-center justify-center space-x-2 cursor-pointer ${
-                    emailInput.trim()
-                      ? 'bg-neutral-900 hover:bg-black text-white'
-                      : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'
-                  }`}
+                  className="w-full py-3.5 rounded-xl text-sm font-semibold bg-neutral-900 hover:bg-black text-white transition-all shadow-sm flex items-center justify-center space-x-2 cursor-pointer"
                 >
-                  {isAuthenticating && authProviderLoading === 'email' ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-                      <span>Verifying & Redirecting...</span>
-                    </>
-                  ) : (
-                    <span>Continue to {isTrialSelected ? '3-Day Free Trial' : 'Ziina Checkout'}</span>
-                  )}
+                  <span>Continue with Email</span>
                 </button>
               </form>
 
-              {/* Footer */}
-              <div className="pt-2 text-center text-xs text-neutral-500">
-                Don't have an account yet?{' '}
-                <span 
-                  onClick={() => executeAuthenticationAndRedirect(emailInput, 'google')}
-                  className="text-neutral-900 font-semibold underline hover:text-black cursor-pointer"
-                >
-                  Sign Up with Google
-                </span>
-              </div>
-
               {/* Security info bar */}
-              <div className="pt-2 border-t border-neutral-100 flex items-center justify-between text-[11px] text-neutral-400">
-                <span className="font-mono">IP: {deviceInfo.ipAddress}</span>
+              <div className="pt-2 border-t border-neutral-100 flex items-center justify-between text-[11px] text-neutral-400 font-mono">
+                <span>MAC: {deviceInfo.macHash}</span>
                 <span className="flex items-center text-emerald-700">
                   <ShieldCheck className="w-3.5 h-3.5 mr-1" />
-                  Verified 256-Bit SSL
+                  Hardware Verified
                 </span>
               </div>
             </div>
@@ -628,7 +633,214 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
         )}
 
         {/* ============================================================== */}
-        {/* STEP 3: ZIINA PAYMENT SUBMITTED - AWAITING ADMIN APPROVAL      */}
+        {/* STEP 3: AUTHENTIC PROVIDER WINDOW / OAUTH CONFIRMATION        */}
+        {/* ============================================================== */}
+        {step === 'authenticating_provider' && (
+          <div className="p-6 sm:p-8 space-y-6 animate-fadeIn text-center">
+            {/* Provider Logo Header */}
+            <div className="space-y-3">
+              <div className="w-16 h-16 rounded-3xl bg-neutral-50 border border-neutral-200 flex items-center justify-center mx-auto shadow-xs">
+                {providerAuthPhase === 'success' ? (
+                  <CheckCircle2 className="w-9 h-9 text-emerald-600 animate-bounce" />
+                ) : selectedProvider === 'google' ? (
+                  <svg className="w-8 h-8 animate-pulse" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                  </svg>
+                ) : selectedProvider === 'facebook' ? (
+                  <div className="w-8 h-8 rounded-lg bg-[#1877F2] text-white flex items-center justify-center font-black text-xl">
+                    f
+                  </div>
+                ) : selectedProvider === 'microsoft' ? (
+                  <svg className="w-8 h-8" viewBox="0 0 23 23">
+                    <path fill="#f35325" d="M1 1h10v10H1z"/>
+                    <path fill="#81bc06" d="M12 1h10v10H12z"/>
+                    <path fill="#05a6f0" d="M1 12h10v10H1z"/>
+                    <path fill="#ffba08" d="M12 12h10v10H12z"/>
+                  </svg>
+                ) : (
+                  <KeyRound className="w-8 h-8 text-neutral-800" />
+                )}
+              </div>
+
+              <h2 className="text-xl sm:text-2xl font-black font-heading text-neutral-900">
+                {providerAuthPhase === 'success' 
+                  ? 'Authentication Successful!' 
+                  : selectedProvider === 'google' 
+                  ? 'Connecting to Google Accounts...' 
+                  : 'Authenticating Session...'}
+              </h2>
+              <p className="text-xs text-neutral-500 max-w-sm mx-auto">
+                {providerAuthPhase === 'success'
+                  ? 'Redirecting your session to https://zerowasteacademy.supritamone.com/'
+                  : 'Secure authentication initiated with Google Accounts (256-Bit SSL).'}
+              </p>
+            </div>
+
+            {/* Hardware & Identity Verification Card */}
+            <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-4 text-xs text-left space-y-2.5 font-mono">
+              <div className="flex items-center justify-between pb-2 border-b border-neutral-200">
+                <span className="text-neutral-500 font-sans">Account Profile</span>
+                <span className="font-bold text-neutral-900 flex items-center space-x-1.5 font-sans">
+                  <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Basu Eats (basueats@gmail.com)</span>
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between pb-2 border-b border-neutral-200">
+                <span className="text-neutral-500 font-sans">Workstation MAC</span>
+                <span className="font-bold text-neutral-800">{deviceInfo.macHash}</span>
+              </div>
+
+              <div className="flex items-center justify-between pb-2 border-b border-neutral-200">
+                <span className="text-neutral-500 font-sans">Target Redirect</span>
+                <span className="font-bold text-emerald-700 truncate max-w-[220px]">{TARGET_HOME_URL}</span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-neutral-500 font-sans">Redirect Status</span>
+                <span className="font-bold text-emerald-600 font-sans flex items-center space-x-1">
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  <span>{providerAuthPhase === 'success' ? 'Navigating now...' : 'Verifying credentials...'}</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Direct Redirect Action Button */}
+            <div className="space-y-3 pt-2">
+              <a
+                href={TARGET_HOME_URL}
+                onClick={() => redirectToTargetWebsite()}
+                className="w-full py-4 px-6 rounded-2xl text-xs font-bold uppercase tracking-wider bg-black hover:bg-neutral-800 text-white flex items-center justify-center space-x-2 transition-all shadow-md active:scale-95 cursor-pointer block text-center"
+              >
+                <span>Continue to {TARGET_HOME_URL}</span>
+                <ArrowRight className="w-4 h-4 ml-1" />
+              </a>
+
+              <button
+                type="button"
+                onClick={() => setStep('login')}
+                className="text-xs font-semibold text-neutral-400 hover:text-black transition-colors"
+              >
+                &larr; Return to options
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* STEP 4: WORKSTATION MAC RESTRICTION (1-TIME LOGIN LIMIT)      */}
+        {/* ============================================================== */}
+        {step === 'mac_restricted' && (
+          <div className="p-6 sm:p-8 space-y-6 animate-fadeIn">
+            <div className="text-center space-y-2">
+              <div className="w-16 h-16 rounded-3xl bg-red-50 border border-red-200 text-red-600 flex items-center justify-center mx-auto shadow-xs">
+                <ShieldAlert className="w-9 h-9" />
+              </div>
+
+              <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-red-100 text-red-800 border border-red-200">
+                <Lock className="w-3 h-3 text-red-600" />
+                <span>1-TIME TRIAL LIMIT REACHED ON THIS DEVICE</span>
+              </div>
+
+              <h2 className="text-xl sm:text-2xl font-black font-heading text-neutral-900">
+                Workstation Access Restricted
+              </h2>
+              <p className="text-xs text-neutral-600 max-w-sm mx-auto leading-relaxed">
+                On the live website, free trial access is strictly restricted to <strong>one time per physical workstation / MAC address</strong>.
+              </p>
+            </div>
+
+            {/* Hardware Lock Details */}
+            <div className="bg-red-50/60 border border-red-200 rounded-2xl p-4.5 space-y-2.5 text-xs font-mono">
+              <div className="flex items-center justify-between pb-2 border-b border-red-200/70">
+                <span className="text-neutral-500 font-sans">Locked MAC Address</span>
+                <span className="font-bold text-red-900">{deviceInfo.macHash}</span>
+              </div>
+
+              <div className="flex items-center justify-between pb-2 border-b border-red-200/70">
+                <span className="text-neutral-500 font-sans">Client IP</span>
+                <span className="font-bold text-neutral-800">{deviceInfo.ipAddress}</span>
+              </div>
+
+              <div className="flex items-center justify-between pb-2 border-b border-red-200/70">
+                <span className="text-neutral-500 font-sans">Device Fingerprint</span>
+                <span className="font-bold text-neutral-800">{deviceInfo.deviceId}</span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-neutral-500 font-sans">Live Policy</span>
+                <span className="font-bold text-red-800 font-sans">1 Trial Claimed • Upgrade Required</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-neutral-600 leading-relaxed text-center">
+              To unlock full commercial access for your culinary brigade, please select an annual plan below. Paid activations permanently unlock your device.
+            </p>
+
+            {/* Upgrade Plan Buttons */}
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedPlanId('team');
+                  setStep('login');
+                }}
+                className="w-full py-3.5 px-4 rounded-xl font-bold text-xs uppercase tracking-wider bg-black hover:bg-neutral-800 text-white flex items-center justify-between transition-all shadow-md active:scale-95 cursor-pointer"
+              >
+                <span>Team Brigade Annual Plan ($79 USD)</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedPlanId('individual');
+                  setStep('login');
+                }}
+                className="w-full py-3 px-4 rounded-xl font-bold text-xs uppercase tracking-wider bg-neutral-100 hover:bg-neutral-200 text-neutral-800 border border-neutral-300 flex items-center justify-between transition-all cursor-pointer"
+              >
+                <span>Individual Chef Plan ($99 USD)</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedPlanId('training');
+                  setStep('login');
+                }}
+                className="w-full py-3 px-4 rounded-xl font-bold text-xs uppercase tracking-wider bg-neutral-100 hover:bg-neutral-200 text-neutral-800 border border-neutral-300 flex items-center justify-between transition-all cursor-pointer"
+              >
+                <span>Executive Culinary Training ($1499 USD)</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Developer / Admin Portal Link */}
+            <div className="pt-2 text-center border-t border-neutral-200">
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  if (onOpenAdminPortal) {
+                    onOpenAdminPortal();
+                  } else if (typeof window !== 'undefined') {
+                    window.location.hash = '#admin';
+                  }
+                }}
+                className="text-xs font-semibold text-neutral-500 hover:text-black underline underline-offset-2 cursor-pointer"
+              >
+                Administrator? Open Admin Portal to reset MAC hold in backend &rarr;
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* STEP 5: ZIINA PAYMENT SUBMITTED - AWAITING ADMIN APPROVAL      */}
         {/* ============================================================== */}
         {step === 'awaiting_payment' && (
           <div className="p-6 sm:p-8 space-y-6 animate-fadeIn">
@@ -646,7 +858,6 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
                 {isApprovedSuccess ? 'Payment Approved!' : 'Payment Submitted via Ziina'}
               </h2>
 
-              {/* Admin Notification Dispatch Tag */}
               <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-neutral-100 text-neutral-800 border border-neutral-200">
                 <MailCheck className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Admin Notified: {ADMIN_NOTIFICATION_EMAIL}</span>
@@ -746,7 +957,6 @@ export const PaymentAuthModal: React.FC<PaymentAuthModalProps> = ({
               )}
             </div>
 
-            {/* Back button */}
             <div className="pt-2 text-center">
               <button
                 type="button"
