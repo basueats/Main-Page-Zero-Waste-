@@ -4,7 +4,6 @@ import { Logo } from './Logo';
 import { 
   Menu, 
   X, 
-  Bell, 
   ArrowRight,
   Sparkles,
   User,
@@ -62,15 +61,14 @@ export const Navbar: React.FC<NavbarProps> = ({
               Zero waste by Supritamone • Turning commercial kitchen waste into high-margin profit
             </span>
           </div>
-          <div className="flex items-center space-x-3 text-xs">
             <button
-              onClick={() => handleNavClick('dashboard')}
-              className="text-emerald-400 hover:text-emerald-300 font-medium flex items-center space-x-1"
+              onClick={() => handleNavClick('admin')}
+              className="text-neutral-400 hover:text-white font-medium flex items-center space-x-1 transition-colors cursor-pointer"
+              title="Open Admin Management Portal"
             >
-              <Bell className="w-3.5 h-3.5" />
-              <span>{activeDonationAlertsCount} Live Food Rescue Alerts</span>
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Admin Portal</span>
             </button>
-          </div>
         </div>
       </div>
 
@@ -182,16 +180,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Mobile menu trigger */}
           <div className="flex lg:hidden items-center space-x-2">
             <button
-              onClick={() => handleNavClick('dashboard')}
-              className="p-2 rounded-lg bg-neutral-100 text-neutral-800 relative"
-              aria-label="Dashboard Alerts"
-            >
-              <Bell className="w-5 h-5" />
-              {activeDonationAlertsCount > 0 && (
-                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-600" />
-              )}
-            </button>
-            <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="p-2 rounded-lg text-neutral-700 hover:text-black"
               aria-label="Toggle menu"
@@ -261,6 +249,16 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="w-full py-2.5 rounded-xl text-xs font-bold bg-black text-white text-center"
             >
               JOIN NOW
+            </button>
+          </div>
+
+          <div className="pt-2 text-center">
+            <button
+              onClick={() => handleNavClick('admin')}
+              className="text-[11px] text-neutral-400 hover:text-black font-semibold flex items-center justify-center space-x-1 mx-auto"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Admin Management Portal</span>
             </button>
           </div>
         </div>

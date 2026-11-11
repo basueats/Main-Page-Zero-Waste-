@@ -24,6 +24,7 @@ import { AddInventoryModal } from './components/AddInventoryModal';
 import { ContactModal } from './components/ContactModal';
 import { PaymentAuthModal } from './components/PaymentAuthModal';
 import { TrialExpiredHoldModal } from './components/TrialExpiredHoldModal';
+import { AdminView } from './components/AdminView';
 import { deviceHoldService } from './services/deviceHoldService';
 
 export default function App() {
@@ -46,53 +47,99 @@ export default function App() {
   const [trialExpiredModalOpen, setTrialExpiredModalOpen] = useState(false);
 
   // Check device hold & trial status on initial load
+  // Check device hold, trial status, and URL payment returns on initial load
   React.useEffect(() => {
-    const isPaid = deviceHoldService.hasActivePaidMembership();
-    const isTrial = deviceHoldService.isTrialActive();
-    const isHeld = deviceHoldService.isDeviceOrIpHeld();
-    const record = deviceHoldService.getRawRecord();
-    const deviceInfo = deviceHoldService.getDeviceInfo();
-
-    if (isPaid) {
-      setCurrentUser({
-        firstName: record.chefName?.split(' ')[0] || 'Culinary',
-        lastName: record.chefName?.split(' ')[1] || 'Director',
-        workPlace: 'Zero Waste Commercial Kitchen',
-        designation: 'Certified Culinary Director',
-        workEmail: record.userEmail || 'member@kitchen.org',
-        isAuthenticated: true,
-        selectedPlanId: record.activeMembershipPlan,
-        planStatus: record.activeMembershipPlan === 'team' ? 'team_active' : (
-          record.activeMembershipPlan === 'training' ? 'training_active' : 'pro_active'
-        ),
-        membershipExpiresAt: record.membershipExpiresAt,
-        clientIp: deviceInfo.ipAddress,
-        deviceId: deviceInfo.deviceId,
-        isIpHeld: false
-      });
-      setTrialExpiredModalOpen(false);
-    } else if (isTrial) {
-      const remaining = deviceHoldService.getTrialTimeRemaining();
-      setCurrentUser({
-        firstName: record.chefName?.split(' ')[0] || 'Culinary',
-        lastName: record.chefName?.split(' ')[1] || 'Professional',
-        workPlace: 'Commercial Brigade Station',
-        designation: 'Kitchen Professional',
-        workEmail: record.userEmail || 'member.trial@hospitality.com',
-        isAuthenticated: true,
-        selectedPlanId: 'trial',
-        planStatus: 'trial_active',
-        trialDaysLeft: remaining.days,
-        trialHoursLeft: remaining.hours,
-        trialExpiresAt: record.trialExpiresAt,
-        clientIp: deviceInfo.ipAddress,
-        deviceId: deviceInfo.deviceId,
-        isIpHeld: false
-      });
-      setTrialExpiredModalOpen(false);
-    } else if (isHeld) {
-      setTrialExpiredModalOpen(true);
+    // 1. Check for Ziina return query parameters (?paid=true or ?payment=success)
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const isPaidParam = urlParams.get('paid') === 'true' || urlParams.get('payment') === 'success';
+      const planParam = urlParams.get('plan') || localStorage.getItem('zw_pending_paid_plan') || 'individual';
+      
+      if (isPaidParam) {
+        const storedEmail = localStorage.getItem('zw_pending_paid_email') || 'basueats@gmail.com';
+        const storedName = localStorage.getItem('zw_pending_paid_name') || 'Basu Eats';
+        const record = deviceHoldService.activatePaidMembership(planParam, storedEmail, storedName);
+        
+        // Clean query string
+        window.history.replaceState({}, document.title, window.location.pathname);
+        
+        setCurrentUser({
+          firstName: storedName.split(' ')[0] || 'Basu',
+          lastName: storedName.split(' ')[1] || 'Eats',
+          workPlace: 'Zero Waste Commercial Kitchen',
+          designation: 'Culinary Director',
+          workEmail: storedEmail,
+          isAuthenticated: true,
+          selectedPlanId: planParam,
+          planStatus: planParam === 'team' ? 'team_active' : (planParam === 'training' ? 'training_active' : 'pro_active'),
+          membershipExpiresAt: record.membershipExpiresAt,
+          clientIp: deviceHoldService.getDeviceInfo().ipAddress,
+          deviceId: deviceHoldService.getDeviceInfo().deviceId,
+          isIpHeld: false
+        });
+        setTrialExpiredModalOpen(false);
+        setPaymentModalOpen(false);
+        setCurrentPage('home');
+        return;
+      }
     }
+
+    const checkAccessStatus = () => {
+      const isPaid = deviceHoldService.hasActivePaidMembership();
+      const isTrial = deviceHoldService.isTrialActive();
+      const isHeld = deviceHoldService.isDeviceOrIpHeld();
+      const record = deviceHoldService.getRawRecord();
+      const deviceInfo = deviceHoldService.getDeviceInfo();
+
+      if (isPaid) {
+        setCurrentUser({
+          firstName: record.memberName?.split(' ')[0] || 'Culinary',
+          lastName: record.memberName?.split(' ')[1] || 'Director',
+          workPlace: 'Zero Waste Commercial Kitchen',
+          designation: 'Certified Culinary Director',
+          workEmail: record.userEmail || 'member@kitchen.org',
+          isAuthenticated: true,
+          selectedPlanId: record.activeMembershipPlan,
+          planStatus: record.activeMembershipPlan === 'team' ? 'team_active' : (
+            record.activeMembershipPlan === 'training' ? 'training_active' : 'pro_active'
+          ),
+          membershipExpiresAt: record.membershipExpiresAt,
+          clientIp: deviceInfo.ipAddress,
+          deviceId: deviceInfo.deviceId,
+          isIpHeld: false
+        });
+        setTrialExpiredModalOpen(false);
+      } else if (isTrial) {
+        const remaining = deviceHoldService.getTrialTimeRemaining();
+        setCurrentUser({
+          firstName: record.memberName?.split(' ')[0] || 'Basu',
+          lastName: record.memberName?.split(' ')[1] || 'Eats',
+          workPlace: 'Commercial Brigade Station',
+          designation: 'Kitchen Professional',
+          workEmail: record.userEmail || 'basueats@gmail.com',
+          isAuthenticated: true,
+          selectedPlanId: 'trial',
+          planStatus: 'trial_active',
+          trialDaysLeft: remaining.days,
+          trialHoursLeft: remaining.hours,
+          trialExpiresAt: record.trialExpiresAt,
+          clientIp: deviceInfo.ipAddress,
+          deviceId: deviceInfo.deviceId,
+          isIpHeld: false
+        });
+        setTrialExpiredModalOpen(false);
+      } else if (isHeld) {
+        // Strict 3-day hold: access revoked, device locked
+        setCurrentUser(null);
+        setTrialExpiredModalOpen(true);
+      }
+    };
+
+    checkAccessStatus();
+
+    // Check periodically so when 3 days expire, access is revoked immediately
+    const interval = setInterval(checkAccessStatus, 15000);
+    return () => clearInterval(interval);
   }, []);
 
   // Count active alerts
@@ -194,6 +241,7 @@ export default function App() {
             onOpenRecipe={(recipe) => setActiveRecipe(recipe)}
             onOpenBooking={() => handleOpenBooking()}
             onOpenPaymentAuth={handleOpenPaymentAuth}
+            currentUser={currentUser}
           />
         )}
 
@@ -253,6 +301,22 @@ export default function App() {
           <AboutView onOpenBooking={() => handleOpenBooking()} />
         )}
 
+        {currentPage === 'admin' && (
+          <AdminView 
+            onNavigate={setCurrentPage} 
+            onActivateTrialTest={(user) => {
+              setCurrentUser(user);
+              setTrialExpiredModalOpen(false);
+              setPaymentModalOpen(false);
+              setCurrentPage('home');
+            }}
+            onSimulateExpiryTest={() => {
+              setCurrentUser(null);
+              setTrialExpiredModalOpen(true);
+            }}
+          />
+        )}
+
         {currentPage === 'contact' && (
           <div className="min-h-[70vh] flex items-center justify-center py-12 px-4 bg-[#fafbfc]">
             <div className="max-w-md w-full bg-white border border-neutral-200 rounded-3xl p-8 text-center space-y-4 shadow-sm">
@@ -262,7 +326,7 @@ export default function App() {
               </p>
               <button
                 onClick={() => handleOpenBooking()}
-                className="w-full py-3 rounded-xl text-xs font-bold uppercase tracking-wider bg-black hover:bg-neutral-800 text-white shadow-md"
+                className="w-full py-3 rounded-xl text-xs font-bold uppercase tracking-wider bg-black hover:bg-neutral-800 text-white shadow-md cursor-pointer"
               >
                 Open Booking Form
               </button>
@@ -312,15 +376,18 @@ export default function App() {
         currentUser={currentUser}
         onLoginSuccess={handleLoginSuccess}
         onOpenDashboard={() => setCurrentPage('dashboard')}
+        onRedirectHome={() => setCurrentPage('home')}
       />
 
       <TrialExpiredHoldModal
         isOpen={trialExpiredModalOpen}
+        onClose={() => setTrialExpiredModalOpen(false)}
         currentUser={currentUser}
         onMembershipActivated={(updatedUser) => {
           setCurrentUser(updatedUser);
           setTrialExpiredModalOpen(false);
         }}
+        onRedirectHome={() => setCurrentPage('home')}
       />
     </div>
   );

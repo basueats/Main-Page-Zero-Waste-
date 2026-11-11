@@ -9,7 +9,61 @@ export type NavigationPage =
   | 'book' 
   | 'community' 
   | 'about' 
-  | 'contact';
+  | 'contact'
+  | 'admin';
+
+export interface EnrolledUserRecord {
+  id: string;
+  name: string;
+  email: string;
+  workPlace: string;
+  designation: string;
+  authProvider: 'google' | 'linkedin' | 'email';
+  planId: string;
+  planTitle: string;
+  amountPaid: number;
+  currency: string;
+  status: 'trial_active' | 'trial_expired' | 'paid_active' | 'hold_active' | 'pending_approval' | 'rejected';
+  ziinaTransactionId?: string;
+  ipAddress: string;
+  deviceId: string;
+  enrolledAt: string;
+  enrolledTimestamp: number;
+  lastLoginAt: string;
+  daysRunning: number;
+  expiresAt: number;
+  expiresAtFormatted: string;
+  notifiedAdminEmail?: string;
+}
+
+export interface AdminPaymentNotification {
+  id: string;
+  userId: string;
+  customerName: string;
+  customerEmail: string;
+  planId: string;
+  planTitle: string;
+  amountPaid: number;
+  currency: string;
+  ziinaTransactionId: string;
+  submittedAt: number;
+  submittedAtFormatted: string;
+  status: 'pending_approval' | 'approved' | 'rejected';
+  notifiedAdminEmail: string; // supritam.basu@supritamone.com
+  approvedAt?: number;
+}
+
+export interface CustomerApprovalNotice {
+  id: string;
+  customerEmail: string;
+  customerName: string;
+  planTitle: string;
+  amountPaid: number;
+  approvedBy: string; // supritam.basu@supritamone.com
+  approvedAt: number;
+  loginUrl: string; // https://zerowasteacademy.supritamone.com/
+  message: string;
+}
 
 export interface FAQItem {
   question: string;
@@ -49,7 +103,7 @@ export interface ChefUserProfile {
   isIpHeld?: boolean;
   clientIp?: string;
   deviceId?: string;
-  planStatus?: 'trial_active' | 'trial_expired' | 'pro_active' | 'team_active' | 'training_active' | 'none';
+  planStatus?: 'trial_active' | 'trial_expired' | 'pro_active' | 'team_active' | 'training_active' | 'pending_approval' | 'none';
 }
 
 export interface CommunityDonationAlert {

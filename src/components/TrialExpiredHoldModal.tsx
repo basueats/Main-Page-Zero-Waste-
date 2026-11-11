@@ -26,18 +26,30 @@ interface TrialExpiredHoldModalProps {
   onClose?: () => void;
   onMembershipActivated: (updatedUser: ChefUserProfile) => void;
   currentUser: ChefUserProfile | null;
+  onRedirectHome?: () => void;
 }
 
 export const TrialExpiredHoldModal: React.FC<TrialExpiredHoldModalProps> = ({
   isOpen,
+  onClose,
   onMembershipActivated,
-  currentUser
+  currentUser,
+  onRedirectHome
 }) => {
   const [selectedPlanId, setSelectedPlanId] = useState<string>('team');
   const [ziinaWindowOpened, setZiinaWindowOpened] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
 
   if (!isOpen) return null;
+
+  const isDevEnvironment = typeof window !== 'undefined' && (
+    window.location.hostname === 'localhost' ||
+    window.location.hostname.includes('ais-dev') ||
+    window.location.hostname.includes('ais-pre') ||
+    window.location.hostname.includes('127.0.0.1') ||
+    window.location.hostname.includes('run.app') ||
+    window.location.port === '3000'
+  );
 
   const deviceInfo = deviceHoldService.getDeviceInfo();
   const paidPlans = PRICING_PLANS.filter(p => !p.isTrial);
@@ -81,6 +93,9 @@ export const TrialExpiredHoldModal: React.FC<TrialExpiredHoldModalProps> = ({
 
       setIsVerifying(false);
       onMembershipActivated(updatedUser);
+      if (onRedirectHome) {
+        onRedirectHome();
+      }
     }, 900);
   };
 
@@ -92,6 +107,18 @@ export const TrialExpiredHoldModal: React.FC<TrialExpiredHoldModalProps> = ({
       >
         {/* Top Warning Banner */}
         <div className="bg-red-600 text-white p-6 sm:p-7 relative">
+          {/* Close Control */}
+          <div className="absolute top-4 right-4">
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded-full text-white/70 hover:text-white hover:bg-black/20 transition-all cursor-pointer"
+                aria-label="Close"
+              >
+                <span className="text-lg font-bold leading-none">&times;</span>
+              </button>
+            )}
+          </div>
           <div className="flex items-start space-x-4">
             <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center flex-shrink-0 text-white">
               <ShieldAlert className="w-7 h-7" />
@@ -237,65 +264,31 @@ export const TrialExpiredHoldModal: React.FC<TrialExpiredHoldModalProps> = ({
                 Click below to open the secure payment link on Ziina. Once paid, return to this tab to immediately release the device hold and activate your <strong>1-Year Commercial Brigade License</strong>.
               </p>
 
-              <div className="flex flex-col sm:flex-row gap-3">
+              <div className="pt-2">
                 <button
                   type="button"
                   onClick={() => {
                     if (currentPlan.ziinaPayUrl) {
                       handleOpenZiina(currentPlan.ziinaPayUrl);
                     }
+                    handleConfirmZiinaPayment();
                   }}
-                  className="flex-1 py-3.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider bg-black hover:bg-neutral-800 text-white flex items-center justify-center space-x-2 transition-all shadow-md active:scale-95"
-                >
-                  <span>Pay {currentPlan.price} USD on Ziina</span>
-                  <ExternalLink className="w-4 h-4" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleConfirmZiinaPayment}
                   disabled={isVerifying}
-                  className="flex-1 py-3.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center space-x-2 transition-all shadow-md active:scale-95 disabled:opacity-50"
+                  className="w-full py-4 px-6 rounded-2xl text-xs font-bold uppercase tracking-wider bg-black hover:bg-neutral-800 text-white flex items-center justify-center space-x-2 transition-all shadow-md active:scale-95 cursor-pointer"
                 >
                   {isVerifying ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Verifying & Unlocking...</span>
+                      <span>Opening Ziina & Activating 1-Year Access...</span>
                     </>
                   ) : (
                     <>
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>I've Paid — Activate 1-Year Access</span>
+                      <span>Pay {currentPlan.price} USD on Ziina & Unlock 1-Year Access</span>
+                      <ExternalLink className="w-4 h-4" />
                     </>
                   )}
                 </button>
               </div>
-
-              {ziinaWindowOpened && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 flex items-center space-x-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                  <span>
-                    Ziina payment window opened! Complete your transaction on Ziina, then click "I've Paid — Activate 1-Year Access" above.
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Quick Testing Controls (to easily verify trial hold behavior) */}
-          <div className="pt-2 border-t border-neutral-100 flex flex-wrap items-center justify-between gap-2 text-[11px] text-neutral-400">
-            <span>QA Testing Controls:</span>
-            <div className="flex items-center space-x-2">
-              <button
-                type="button"
-                onClick={() => {
-                  deviceHoldService.resetDeviceHold();
-                  window.location.reload();
-                }}
-                className="px-2.5 py-1 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-semibold"
-              >
-                Reset Device/IP Hold (Start Clean)
-              </button>
             </div>
           </div>
         </div>

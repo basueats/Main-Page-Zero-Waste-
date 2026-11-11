@@ -37,6 +37,9 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenBooking }) => 
             <button onClick={() => onNavigate('faq')} className="hover:text-black">
               FAQ
             </button>
+            <button onClick={() => onNavigate('admin')} className="text-emerald-700 hover:text-black font-semibold flex items-center space-x-1">
+              <span>Admin Portal</span>
+            </button>
             <button onClick={onOpenBooking} className="hover:text-black font-bold">
               Contact
             </button>

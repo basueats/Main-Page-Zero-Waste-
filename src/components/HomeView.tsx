@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavigationPage, UpcycledRecipe } from '../types';
+import { NavigationPage, UpcycledRecipe, ChefUserProfile } from '../types';
 import { PRICING_PLANS } from '../data/mockData';
 import { ProblemSolutionSection } from './ProblemSolutionSection';
 import { FAQSection } from './FAQSection';
@@ -22,16 +22,40 @@ interface HomeViewProps {
   onOpenRecipe: (recipe: UpcycledRecipe) => void;
   onOpenBooking: () => void;
   onOpenPaymentAuth?: (planId?: string) => void;
+  currentUser?: ChefUserProfile | null;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
   onNavigate,
   onOpenRecipe,
   onOpenBooking,
-  onOpenPaymentAuth
+  onOpenPaymentAuth,
+  currentUser
 }) => {
   return (
     <div className="bg-white text-neutral-900">
+      {/* Active Trial Confirmation Banner */}
+      {currentUser?.planStatus === 'trial_active' && (
+        <div className="bg-emerald-600 text-white px-4 py-3 shadow-inner animate-fadeIn">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
+            <div className="flex items-center space-x-2">
+              <span className="px-2 py-0.5 rounded bg-black/30 text-[10px] font-bold uppercase tracking-wider">
+                3-Day Trial Active
+              </span>
+              <span>
+                Welcome, <strong>{currentUser.firstName} {currentUser.lastName}</strong> ({currentUser.workEmail})! 
+                Your 3-Day Free Trial ($0 USD) is active with unrestricted access for 72 hours.
+              </span>
+            </div>
+            <button
+              onClick={() => onNavigate('dashboard')}
+              className="px-3 py-1 bg-white text-emerald-950 font-bold rounded-lg text-[11px] hover:bg-neutral-100 whitespace-nowrap cursor-pointer transition-all"
+            >
+              Open Live Dashboard →
+            </button>
+          </div>
+        </div>
+      )}
       {/* 1. HERO SECTION (Exactly matching image_bb109caa.png) */}
       <section className="pt-12 pb-20 lg:pt-20 lg:pb-28 border-b border-neutral-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -55,8 +79,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
               {/* Action Buttons: Solid Black & Outlined as in screenshot */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-3">
                 <button
-                  onClick={onOpenBooking}
-                  className="px-8 py-4 rounded-xl bg-black hover:bg-neutral-800 text-white font-bold text-xs uppercase tracking-wider transition-all shadow-md active:scale-95 text-center"
+                  onClick={() => {
+                    if (onOpenPaymentAuth) {
+                      onOpenPaymentAuth('trial');
+                    } else {
+                      onOpenBooking();
+                    }
+                  }}
+                  className="px-8 py-4 rounded-xl bg-black hover:bg-neutral-800 text-white font-bold text-xs uppercase tracking-wider transition-all shadow-md active:scale-95 text-center cursor-pointer"
                 >
                   JOIN NOW
                 </button>
